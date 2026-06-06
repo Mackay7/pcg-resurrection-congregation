@@ -1,0 +1,388 @@
+// ============================================================
+// Church Management Platform — Prisma Schema
+// Database: PostgreSQL  |  ORM: Prisma
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// ENUMS
+// ============================================================
+
+enum MemberStatus {
+  ACTIVE
+  INACTIVE
+  VISITOR
+  DECEASED
+}
+
+enum MemberRole {
+  MEMBER
+  STAFF
+  ADMIN
+}
+
+enum GroupType {
+  SMALL_GROUP
+  MINISTRY
+  CHOIR
+  VOLUNTEER_TEAM
+  YOUTH
+  KIDS
+  OTHER
+}
+
+enum GroupMemberRole {
+  LEADER
+  CO_LEADER
+  MEMBER
+}
+
+enum EventType {
+  SERVICE
+  SMALL_GROUP
+  MINISTRY
+  COMMUNITY
+  SPECIAL
+  OTHER
+}
+
+enum CheckInMethod {
+  QR
+  MANUAL
+  SELF_CHECK_IN
+}
+
+enum PaymentMethod {
+  CARD
+  ACH
+  APPLE_PAY
+  GOOGLE_PAY
+  CASH
+  CHECK
+}
+
+enum DonationStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+enum RecurrenceInterval {
+  WEEKLY
+  BIWEEKLY
+  MONTHLY
+  QUARTERLY
+  ANNUALLY
+}
+
+enum MessageChannel {
+  EMAIL
+  SMS
+}
+
+enum MessageStatus {
+  DRAFT
+  SCHEDULED
+  SENDING
+  SENT
+  FAILED
+}
+
+enum MessageRecipientStatus {
+  PENDING
+  DELIVERED
+  FAILED
+  BOUNCED
+  OPENED
+  CLICKED
+}
+
+enum ListFilterType {
+  ALL_ACTIVE
+  SMALL_GROUP
+  MINISTRY
+  CUSTOM
+}
+
+// ============================================================
+// PEOPLE & HOUSEHOLDS
+// ============================================================
+
+model Household {
+  id         String   @id @default(uuid())
+  name       String
+  address    String?
+  city       String?
+  state      String?
+  zip        String?
+  country    String?  @default("US")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  members    Member[]
+
+  @@map("households")
+}
+
+model Member {
+  id           String       @id @default(uuid())
+  householdId  String?
+  firstName    String
+  lastName     String
+  email        String?      @unique
+  phone        String?
+  birthDate    DateTime?
+  status       MemberStatus @default(ACTIVE)
+  role         MemberRole   @default(MEMBER)
+  photoUrl     String?
+  notes        String?
+  joinedAt     DateTime?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  household          Household?           @relation(fields: [householdId], references: [id])
+  groupMemberships   GroupMember[]
+  ledGroups          SmallGroup[]         @relation("GroupLeader")
+  attendances        Attendance[]
+  donations          Donation[]
+  createdEvents      Event[]              @relation("EventCreator")
+  sentMessages       Message[]            @relation("MessageSender")
+  listMemberships    ListMember[]
+  messageReceipts    MessageRecipient[]
+
+  @@index([householdId])
+  @@index([status])
+  @@index([email])
+  @@map("members")
+}
+
+// ============================================================
+// GROUPS & MINISTRIES
+// ============================================================
+
+model SmallGroup {
+  id           String    @id @default(uuid())
+  name         String
+  type         GroupType @default(SMALL_GROUP)
+  description  String?
+  leaderId     String?
+  meetingDay   String?
+  meetingTime  String?
+  location     String?
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  leader   Member?       @relation("GroupLeader", fields: [leaderId], references: [id])
+  members  GroupMember[]
+
+  @@index([leaderId])
+  @@index([isActive])
+  @@map("small_groups")
+}
+
+model GroupMember {
+  id        String          @id @default(uuid())
+  groupId   String
+  memberId  String
+  role      GroupMemberRole @default(MEMBER)
+  joinedAt  DateTime        @default(now())
+
+  group   SmallGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  member  Member     @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, memberId])
+  @@index([groupId])
+  @@index([memberId])
+  @@map("group_members")
+}
+
+// ============================================================
+// EVENTS & ATTENDANCE
+// ============================================================
+
+model Event {
+  id           String    @id @default(uuid())
+  title        String
+  description  String?
+  type         EventType @default(SERVICE)
+  isRecurring  Boolean   @default(false)
+  createdById  String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  createdBy  Member?         @relation("EventCreator", fields: [createdById], references: [id])
+  instances  EventInstance[]
+
+  @@index([createdById])
+  @@index([type])
+  @@map("events")
+}
+
+model EventInstance {
+  id           String   @id @default(uuid())
+  eventId      String
+  startsAt     DateTime
+  endsAt       DateTime?
+  location     String?
+  isCancelled  Boolean  @default(false)
+  notes        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  event       Event        @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  attendances Attendance[]
+
+  @@index([eventId])
+  @@index([startsAt])
+  @@map("event_instances")
+}
+
+model Attendance {
+  id              String        @id @default(uuid())
+  eventInstanceId String
+  memberId        String
+  checkInMethod   CheckInMethod @default(MANUAL)
+  checkedInAt     DateTime      @default(now())
+  checkedInById   String?
+
+  eventInstance  EventInstance @relation(fields: [eventInstanceId], references: [id], onDelete: Cascade)
+  member         Member        @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@unique([eventInstanceId, memberId])
+  @@index([eventInstanceId])
+  @@index([memberId])
+  @@map("attendances")
+}
+
+// ============================================================
+// GIVING & DONATIONS
+// ============================================================
+
+model GivingFund {
+  id           String   @id @default(uuid())
+  name         String
+  description  String?
+  isActive     Boolean  @default(true)
+  displayOrder Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  donations  Donation[]
+
+  @@index([isActive])
+  @@map("giving_funds")
+}
+
+model Donation {
+  id                 String              @id @default(uuid())
+  memberId           String?
+  fundId             String
+  amountCents        Int
+  currency           String              @default("USD")
+  paymentMethod      PaymentMethod
+  stripePaymentId    String?             @unique
+  stripeCustomerId   String?
+  isRecurring        Boolean             @default(false)
+  recurrenceInterval RecurrenceInterval?
+  stripeSubscriptionId String?
+  status             DonationStatus      @default(PENDING)
+  notes              String?
+  donatedAt          DateTime            @default(now())
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  member  Member?    @relation(fields: [memberId], references: [id])
+  fund    GivingFund @relation(fields: [fundId], references: [id])
+
+  @@index([memberId])
+  @@index([fundId])
+  @@index([status])
+  @@index([donatedAt])
+  @@map("donations")
+}
+
+// ============================================================
+// COMMUNICATION
+// ============================================================
+
+model CommunicationList {
+  id          String         @id @default(uuid())
+  name        String
+  description String?
+  filterType  ListFilterType @default(CUSTOM)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  members   ListMember[]
+  messages  Message[]
+
+  @@map("communication_lists")
+}
+
+model ListMember {
+  id           String   @id @default(uuid())
+  listId       String
+  memberId     String
+  isSubscribed Boolean  @default(true)
+  addedAt      DateTime @default(now())
+
+  list    CommunicationList @relation(fields: [listId], references: [id], onDelete: Cascade)
+  member  Member            @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@unique([listId, memberId])
+  @@index([listId])
+  @@index([memberId])
+  @@map("list_members")
+}
+
+model Message {
+  id          String         @id @default(uuid())
+  listId      String?
+  sentById    String?
+  channel     MessageChannel
+  subject     String?
+  body        String
+  status      MessageStatus  @default(DRAFT)
+  scheduledAt DateTime?
+  sentAt      DateTime?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  list       CommunicationList? @relation(fields: [listId], references: [id])
+  sentBy     Member?            @relation("MessageSender", fields: [sentById], references: [id])
+  recipients MessageRecipient[]
+
+  @@index([listId])
+  @@index([status])
+  @@index([scheduledAt])
+  @@map("messages")
+}
+
+model MessageRecipient {
+  id          String                 @id @default(uuid())
+  messageId   String
+  memberId    String
+  status      MessageRecipientStatus @default(PENDING)
+  deliveredAt DateTime?
+  openedAt    DateTime?
+  clickedAt   DateTime?
+
+  message  Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  member   Member  @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, memberId])
+  @@index([messageId])
+  @@index([memberId])
+  @@index([status])
+  @@map("message_recipients")
+}
