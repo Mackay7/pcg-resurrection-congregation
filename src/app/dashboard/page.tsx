@@ -1,84 +1,9 @@
-import { createClient } from '@/lib/supabase/server'
-import { prisma } from '@/lib/prisma'
+export const dynamic = 'force-dynamic'
+export const fetchCache = 'force-no-store'
+
 import Link from 'next/link'
 
-export const dynamic = 'force-dynamic'
-
-const fmt = (c: number) =>
-  new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(c / 100)
-
-interface DonationWithRelations {
-  id: string
-  amountCents: number
-  isRecurring: boolean
-  member: { firstName: string; lastName: string } | null
-  fund: { name: string }
-}
-
-interface AttendanceWithRelations {
-  id: string
-  checkInMethod: string
-  member: { firstName: string; lastName: string } | null
-}
-
-export default async function DashboardPage() {
-  let memberCount = 0
-  let activeCount = 0
-  let visitorCount = 0
-  let monthlyGiving = 0
-  let todayAttendance = 0
-  let recentDonations: DonationWithRelations[] = []
-  let recentAttendance: AttendanceWithRelations[] = []
-
-  try {
-    const [mc, ac, vc] = await Promise.all([
-      prisma.member.count(),
-      prisma.member.count({ where: { status: 'ACTIVE' } }),
-      prisma.member.count({ where: { status: 'VISITOR' } }),
-    ])
-    memberCount = mc
-    activeCount = ac
-    visitorCount = vc
-
-    const giving = await prisma.donation.aggregate({
-      where: {
-        status: 'COMPLETED',
-        donatedAt: { gte: new Date(new Date().getFullYear(), new Date().getMonth(), 1) },
-      },
-      _sum: { amountCents: true },
-    })
-    monthlyGiving = giving._sum.amountCents ?? 0
-
-    todayAttendance = await prisma.attendance.count({
-      where: { checkedInAt: { gte: new Date(new Date().setHours(0, 0, 0, 0)) } },
-    })
-
-    recentDonations = await prisma.donation.findMany({
-      take: 5,
-      orderBy: { donatedAt: 'desc' },
-      where: { status: 'COMPLETED' },
-      include: {
-        member: { select: { firstName: true, lastName: true } },
-        fund: { select: { name: true } },
-      },
-    }) as DonationWithRelations[]
-
-    recentAttendance = await prisma.attendance.findMany({
-      take: 5,
-      orderBy: { checkedInAt: 'desc' },
-      include: { member: { select: { firstName: true, lastName: true } } },
-    }) as AttendanceWithRelations[]
-  } catch (_e) {
-    // DB not connected yet — show empty state
-  }
-
-  const stats = [
-    { label: 'Total members', value: memberCount || '—', sub: `${activeCount} active · ${visitorCount} visitors`, color: '#2D6A4F', bg: '#EAF3DE' },
-    { label: "Today's attendance", value: todayAttendance || '—', sub: 'Check in members below', color: '#1B4F8C', bg: '#E8F0FB' },
-    { label: 'Giving this month', value: monthlyGiving ? fmt(monthlyGiving) : '—', sub: 'Across all funds', color: '#9A5C00', bg: '#FBF6E9' },
-    { label: 'Platform status', value: 'Live ✓', sub: 'PCG Resurrection Congregation', color: '#2D6A4F', bg: '#EAF3DE' },
-  ]
-
+export default function DashboardPage() {
   return (
     <div style={{ padding: '24px 28px 40px' }}>
       <div style={{ marginBottom: 24 }}>
@@ -87,7 +12,12 @@ export default async function DashboardPage() {
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginBottom: 24 }}>
-        {stats.map((s, i) => (
+        {[
+          { label: 'Total members', value: '—', sub: 'Connect database to load', color: '#2D6A4F', bg: '#EAF3DE' },
+          { label: "Today's attendance", value: '—', sub: 'Start check-in below', color: '#1B4F8C', bg: '#E8F0FB' },
+          { label: 'Giving this month', value: '—', sub: 'Across all funds', color: '#9A5C00', bg: '#FBF6E9' },
+          { label: 'Platform status', value: 'Live ✓', sub: 'PCG Resurrection Congregation', color: '#2D6A4F', bg: '#EAF3DE' },
+        ].map((s, i) => (
           <div key={i} style={{ background: '#fff', border: '1px solid #E8E7DF', borderRadius: 10, padding: 16 }}>
             <div style={{ width: 32, height: 32, borderRadius: 6, background: s.bg, marginBottom: 10 }} />
             <div style={{ fontFamily: 'Georgia,serif', fontSize: 26, fontWeight: 500, color: '#1C1C1A' }}>{s.value}</div>
@@ -97,55 +27,21 @@ export default async function DashboardPage() {
         ))}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
-        <div style={{ background: '#fff', border: '1px solid #E8E7DF', borderRadius: 12, padding: 18 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-            <h2 style={{ fontSize: 16, fontFamily: 'Georgia,serif' }}>Recent check-ins</h2>
-            <Link href="/dashboard/attendance" style={{ fontSize: 12, color: '#6B6B64', textDecoration: 'none' }}>View all →</Link>
-          </div>
-          {recentAttendance.length === 0 ? (
-            <p style={{ fontSize: 13, color: '#6B6B64', textAlign: 'center', padding: '20px 0' }}>
-              No check-ins yet — <Link href="/dashboard/attendance" style={{ color: '#1B4F8C' }}>start check-in</Link>
-            </p>
-          ) : recentAttendance.map((a, i) => (
-            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: '1px solid #F4F3EE' }}>
-              <div style={{ width: 32, height: 32, borderRadius: '50%', background: '#F4F3EE', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 500 }}>
-                {a.member?.firstName?.[0]}{a.member?.lastName?.[0]}
-              </div>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 13, fontWeight: 500 }}>{a.member?.firstName} {a.member?.lastName}</div>
-              </div>
-              <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 20, background: '#EAF3DE', color: '#2D6A4F', fontWeight: 500 }}>✓ In</span>
-            </div>
-          ))}
-        </div>
-
-        <div style={{ background: '#fff', border: '1px solid #E8E7DF', borderRadius: 12, padding: 18 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-            <h2 style={{ fontSize: 16, fontFamily: 'Georgia,serif' }}>Recent donations</h2>
-            <Link href="/dashboard/giving" style={{ fontSize: 12, color: '#6B6B64', textDecoration: 'none' }}>View all →</Link>
-          </div>
-          {recentDonations.length === 0 ? (
-            <p style={{ fontSize: 13, color: '#6B6B64', textAlign: 'center', padding: '20px 0' }}>
-              No donations yet — <Link href="/dashboard/giving" style={{ color: '#1B4F8C' }}>record one</Link>
-            </p>
-          ) : recentDonations.map((d, i) => (
-            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: '1px solid #F4F3EE' }}>
-              <div style={{ width: 32, height: 32, borderRadius: '50%', background: '#F4F3EE', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 500 }}>
-                {d.member?.firstName?.[0] ?? '?'}
-              </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: 500 }}>{d.member ? `${d.member.firstName} ${d.member.lastName}` : 'Anonymous'}</div>
-                <div style={{ fontSize: 11, color: '#6B6B64' }}>{d.fund.name}</div>
-              </div>
-              <div style={{ textAlign: 'right' }}>
-                <div style={{ fontSize: 13, fontWeight: 500 }}>{fmt(d.amountCents)}</div>
-                <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 20, background: d.isRecurring ? '#E8F0FB' : '#F4F3EE', color: d.isRecurring ? '#1B4F8C' : '#6B6B64', fontWeight: 500 }}>
-                  {d.isRecurring ? 'Recurring' : 'One-time'}
-                </span>
-              </div>
-            </div>
-          ))}
+      <div style={{ background: '#fff', border: '1px solid #E8E7DF', borderRadius: 12, padding: 24, marginBottom: 16, textAlign: 'center' }}>
+        <div style={{ fontSize: 32, marginBottom: 12 }}>⛪</div>
+        <h2 style={{ fontFamily: 'Georgia,serif', fontSize: 20, color: '#1C1C1A', marginBottom: 8 }}>
+          PCG, Resurrection Congregation
+        </h2>
+        <p style={{ fontSize: 13, color: '#6B6B64', marginBottom: 20, maxWidth: 400, margin: '0 auto 20px' }}>
+          Your platform is live. Add your Supabase and Stripe credentials in Vercel to connect your congregation data.
+        </p>
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
+          <a href="https://supabase.com/dashboard" target="_blank" rel="noreferrer" style={{ padding: '9px 18px', borderRadius: 8, background: '#0F0F0E', color: '#fff', fontSize: 13, fontWeight: 500, textDecoration: 'none' }}>
+            Open Supabase →
+          </a>
+          <a href="https://vercel.com/dashboard" target="_blank" rel="noreferrer" style={{ padding: '9px 18px', borderRadius: 8, border: '1px solid #E8E7DF', background: '#fff', color: '#1C1C1A', fontSize: 13, fontWeight: 500, textDecoration: 'none' }}>
+            Open Vercel settings →
+          </a>
         </div>
       </div>
 
@@ -153,11 +49,11 @@ export default async function DashboardPage() {
         <h2 style={{ fontSize: 16, fontFamily: 'Georgia,serif', marginBottom: 14 }}>Quick actions</h2>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 10 }}>
           {([
-            ['Add member', '/dashboard/members', '#EAF3DE'],
-            ['Start check-in', '/dashboard/attendance', '#E8F0FB'],
-            ['Record donation', '/dashboard/giving', '#FBF6E9'],
-            ['Send message', '/dashboard/communications', '#FDEAEA'],
-            ['Pastoral report', '/dashboard/report', '#F4F3EE'],
+            ['Members', '/dashboard/members', '#EAF3DE'],
+            ['Attendance', '/dashboard/attendance', '#E8F0FB'],
+            ['Giving', '/dashboard/giving', '#FBF6E9'],
+            ['Communications', '/dashboard/communications', '#FDEAEA'],
+            ['Report', '/dashboard/report', '#F4F3EE'],
           ] as [string, string, string][]).map(([label, href, bg]) => (
             <Link key={href} href={href} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, padding: '14px 10px', borderRadius: 8, border: '1px solid #E8E7DF', background: '#fff', textDecoration: 'none', textAlign: 'center' }}>
               <div style={{ width: 32, height: 32, borderRadius: 8, background: bg }} />
